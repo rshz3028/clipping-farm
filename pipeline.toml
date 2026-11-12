@@ -1,0 +1,225 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Shorts pipeline settings.
+#
+# Each [stages.X] block picks WHICH implementation runs that stage ("impl")
+# and gives it its settings. Implementations live in pipeline/stages/X/<impl>.py.
+#
+# To change a stage: edit its settings here, or add a new <impl>.py file in
+# its folder and point "impl" at it. Other stages are not affected. Only the
+# changed stage and the stages after it re-run (they notice their inputs changed).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Pacing of the finished Short (read by narrate, captions, render, package) ──
+[timing]
+playback_speed = 1.2       # the WHOLE finished video (picture + voice) is sped up by this; voice keeps its pitch
+max_seconds = 59.5         # final length limit
+end_card_seconds = 2.5     # attribution card length in the final video
+
+[paths]
+work   = "work"      # registry database, per-source and per-short working folders
+output = "output"    # review/ and approved/
+models = "models"    # all AI models live here
+cache  = "cache"     # download caches (Hugging Face, pip)
+
+[stages.download]
+impl = "archive_api"
+nasa_quality = ["large", "medium", "small", "mobile"]   # best first; first one under max_mb is used
+max_mb = 1100
+
+[stages.transcribe]
+impl = "faster_whisper"
+models = ["large-v3-turbo", "medium"]   # tried in order; next one is used if GPU runs out of memory
+device = "cuda"
+compute_type = "int8"
+language = "en"
+beam_size = 5
+vad_filter = true
+
+[stages.describe]
+impl = "none"              # "florence2" = local vision model describes each shot (currently ~40 s/shot on CPU)
+model_dir = "models/florence2/base"
+task = "<CAPTION>"
+max_tokens = 40
+threads = 8
+
+[stages.shots]
+impl = "pyscenedetect"
+threshold = 27.0        # lower = more cuts detected
+min_scene_frames = 12
+
+# ── Claude ("brain") stages. Each makes ONE `claude -p` call per source video
+#    (the check stage makes up to 3 if a rewrite is needed). Prompts are in prompts/*.md.
+#    model: "sonnet" (cheaper on usage) or "opus" (stronger writing).
+
+[stages.select]
+impl = "claude_cli"
+prompt = "select_moments"
+model = "sonnet"
+max_candidates = 4
+block_seconds = 20        # transcript is merged into blocks this long to save tokens
+
+[stages.script]
+impl = "claude_cli"
+prompt = "write_script"
+model = "sonnet"
+scripts_per_source = 2    # best N candidates get a script
+window_padding = 45       # seconds of transcript/shots given around each candidate
+min_words = 110           # script length; at 1.2x playback this is about 38-55 s
+max_words = 160
+words_per_second = 2.9    # final pace: natural voice (~2.4 w/s) x playback_speed 1.2
+
+[stages.check]
+impl = "claude_cli"
+prompt = "check_originality"
+rewrite_prompt = "rewrite_script"
+model = "sonnet"
+max_rewrites = 1
+window_padding = 45
+min_words = 110
+max_words = 160
+words_per_second = 2.9
+
+[stages.check.thresholds]  # a script passes only if the reviewer says pass AND all of these hold
+min_narrative_independence = 7
+min_original_explanation   = 7
+min_educational_value      = 6
+max_source_dependence      = 3
+max_repetition             = 3
+min_factual_confidence     = 8
+max_copied_words           = 6     # longest run of words copied from the source narration
+max_prior_similarity       = 0.15  # word-3-gram overlap with any published script
+
+# ── Short-level stages (one run per finished Short) ────────────────────────────
+
+[stages.narrate]
+impl = "kokoro_onnx"
+model_file  = "models/kokoro/kokoro-v1.0.onnx"
+voices_file = "models/kokoro/voices-v1.0.bin"
+voice = "af_heart"         # chosen by owner 2026-11-11 (Kokoro's top-rated voice). Others e.g. af_heart, af_bella, am_michael, am_fenrir, bf_emma, bm_george
+speed = 1.0                # voice's own speed; keep ~1.0 for natural delivery (use [timing] to speed up)
+lang  = "en-us"
+lead_in = 0.2              # seconds of silence before the first word
+sentence_gap = 0.25        # seconds of silence between sentences
+max_speedup = 1.1          # if still too long, speed up at most this much more (x speed)
+
+[stages.captions]
+impl = "whisper_align"
+whisper_model = "large-v3-turbo"   # re-listens to the narration for word-perfect timing (GPU)
+device = "cuda"
+compute_type = "int8"
+font = "Be Vietnam Pro"            # from MoneyPrinterTurbo/resource/fonts
+font_size = 80
+text_color = "#FFFFFF"
+highlight_color = "#FFD84D"        # colour of the word being spoken
+max_words = 3                      # words per caption group
+max_chars = 18
+caption_y = 1480                   # vertical centre of captions (frame is 1920 tall)
+header = "question"                # "question", "title" or "none": text at the top while narrating
+header_y = 250
+header_size = 56
+header_wrap = 26
+end_size = 46
+end_wrap = 34
+
+[stages.render]
+impl = "ffmpeg_nvenc"
+width = 1080
+height = 1920
+fps = 30
+fg_y = 520                 # top of the (full-width) footage; the rest is a blurred copy
+blur = 20
+bg_brightness = -0.18
+min_clip_seconds = 1.2
+encoder = "h264_nvenc"
+cq = 21                    # NVENC quality (lower = better/bigger)
+fallback_encoder = "libx264"
+crf = 20
+loudness = -14             # LUFS, YouTube's normal level
+fonts_dir = "MoneyPrinterTurbo/resource/fonts"
+
+[stages.package]
+impl = "review_folder"
+description_footer = "Script and narration are original. Archival footage is used as illustration; no endorsement by the footage's creators or sponsors is implied."
+
+# ── YouTube upload (upload_youtube.py). Videos are ALWAYS uploaded as private. ──
+[upload]
+client_secret = "secrets/client_secret.json"   # from Google Cloud Console (see README)
+token = "secrets/youtube_token.json"            # created automatically on first sign-in
+category_id = "27"                              # Education
+language = "en"
+made_for_kids = false
+contains_synthetic_media = false  # YouTube "altered or synthetic content" label: off (turned off by you, 2026-11-11)
+tags = ["science", "history", "archival footage", "explained"]
+max_per_run = 5                   # YouTube API quota allows about 6 uploads per day
+
+# ── Daily run (run_daily.py): the jobs, in order. Each is pipeline/daily/<name>.py ──
+[daily]
+jobs = ["analytics", "edits", "cleanup"]   # educational Shorts paused by owner (2026-11-12); add "discover", "produce" back to resume
+
+[daily.edits]
+count = 2                  # music edits per day
+theme = "jets"
+
+[daily.discover]
+min_fresh_sources = 4      # search for new sources when fewer unused ones than this remain
+max_new = 5                # add at most this many new sources per run
+
+[daily.cleanup]
+delete_used_sources = true         # delete a source's video once all its Shorts are made
+delete_short_working_files = true  # delete working copies once a Short is in output/
+keep_llm_raw_days = 30
+
+# ── Source discovery. Finders: pipeline/discover/finders/<name>.py; scorer: pipeline/discover/scorers/ ──
+[discover]
+finders = ["nasa_images", "prelinger"]
+scorer = "claude_cli"      # one batched Claude call judges how well each film fits the channel
+min_fit = 7                # 0-10; only films scoring at least this are added
+max_new = 5
+max_to_score = 30
+
+[discover.scorer_settings]
+prompt = "score_sources"
+model = "sonnet"
+
+[discover.nasa_images]
+queries = ["apollo film", "gemini mission film", "mercury program", "skylab", "space shuttle history",
+           "wind tunnel history", "rocket engine test", "lunar module", "x-15", "aeronautics history",
+           "16mm film transfer", "historic film"]
+exclude_centers = ["JPL"]          # JPL is run by Caltech; different terms
+exclude_title_patterns = ["This Week @NASA", "music", "trailer", "interview", "Q&A", "briefing",
+                          "news conference", "press conference", "Fireside", "live", "panel", "podcast",
+                          "teaser", "reel 20", "B-roll"]
+min_minutes = 5
+max_minutes = 60
+max_checks = 25                    # licence checks per run (each is 2 small web requests)
+
+[discover.prelinger]
+queries = ["subject:science", "subject:physics", "subject:chemistry", "subject:astronomy",
+           "subject:aviation", "subject:engineering", "subject:biology", "subject:weather",
+           "subject:geology", "subject:technology", "subject:electricity", "subject:transportation"]
+exclude_subject_patterns = ["advertis", "commercial", "propaganda", "trailer", "television commercials"]
+min_minutes = 6
+max_minutes = 40
+max_checks = 25
+
+# ── Music edits (pipeline/edits/, make_edit.py, daily job "edits") ──
+[edits]
+seconds = 20               # edit length (cut on the beat, so +-1 beat)
+chart_country = "us"       # YouTube Shorts chart used to pick the trending music STYLE
+
+[edits.themes.jets]
+min_sources = 4            # search NASA for more B-roll when fewer videos than this are on disk
+max_new = 2                # new footage videos per search
+queries = ["F-18 B-roll", "F-15 B-roll", "aircraft B-roll", "jet flight B-roll", "T-38 B-roll", "X-59 B-roll", "flight research B-roll", "chase plane B-roll"]
+must_match = "b-?roll"     # only raw footage (no narrated/edited pieces with their own music)
+exclude_title_patterns = ["incentive flight", "interview", "this week", "ingenuity", "mars", "soundbite"]
+min_minutes = 1
+max_minutes = 20
+max_checks = 15
+quality = ["large", "medium"]
+max_mb = 500
+subject = "Jets"
+titles = ["{subject} full send ✈️🔥", "{subject} hits different 🔥", "POV: {subject} 😈✈️", "{subject} on another level ✈️", "Built different: {subject} 🔥"]
+hashtags = "#jets #fighterjet #aviation #edit #phonk"
+tags = ["fighter jet", "jets", "aviation", "jet edit", "phonk", "military aviation", "airshow"]
+category = "Autos & Vehicles"

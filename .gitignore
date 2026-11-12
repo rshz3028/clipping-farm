@@ -1,0 +1,20 @@
+# Big / generated / machine-specific
+.venv/
+runtime/
+models/
+cache/
+work/
+output/
+_old/
+tools_edit/
+MoneyPrinterTurbo/.venv/
+__pycache__/
+*.pyc
+
+# Never commit credentials
+secrets/
+*.token.json
+client_secret*.json
+
+# Local notes for the coding assistant
+CLAUDE.md

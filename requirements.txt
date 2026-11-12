@@ -1,0 +1,9 @@
+# Everything the Shorts pipeline needs. Exact versions are pinned in constraints.txt.
+-r MoneyPrinterTurbo/requirements.txt
+scenedetect
+opencv-python-headless
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+google-api-python-client
+google-auth-oauthlib
+kokoro-onnx
