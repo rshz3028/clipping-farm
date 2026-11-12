@@ -24,3 +24,15 @@ def run(ctx):
             ctx.log(f"   {line}")
     if p.returncode:
         ctx.log(f"analytics: failed (exit {p.returncode}); the rest of the run is unaffected")
+    # dashboard (+ weekly Claude review when due) is built even if the fetch failed
+    try:
+        p = subprocess.run([sys.executable, str(ROOT / "dashboard.py"), "--no-open", "--weekly"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=900, creationflags=NO_WINDOW)
+        for line in (p.stdout + p.stderr).splitlines():
+            if line.strip():
+                ctx.log(f"   {line}")
+        if p.returncode:
+            ctx.log(f"dashboard: failed (exit {p.returncode}); the rest of the run is unaffected")
+    except subprocess.TimeoutExpired:
+        ctx.log("dashboard: timed out (skipped)")

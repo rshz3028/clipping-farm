@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Channel Progress</title>
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f6f5f2; --surface:#fcfcfb; --line:#e4e2dc; --grid:#ecebe6;
+  --ink:#0b0b0b; --ink2:#52514e; --ink3:#7a7974;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b; --info:#7a7974;
+  --track:#e9e7e1;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --bg:#121211; --surface:#1a1a19; --line:#2e2e2b; --grid:#262624;
+    --ink:#f0efec; --ink2:#c3c2b7; --ink3:#8f8e86;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --track:#2a2a27;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#121211; --surface:#1a1a19; --line:#2e2e2b; --grid:#262624;
+  --ink:#f0efec; --ink2:#c3c2b7; --ink3:#8f8e86;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --track:#2a2a27;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:16px}
+h1{font-size:22px;margin:0}
+h2{font-size:15px;margin:0 0 2px}
+.sub{color:var(--ink2);font-size:13px}
+.muted{color:var(--ink3);font-size:12px}
+.grid{display:grid;gap:12px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:12px}
+.two{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.kpi .v{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
+.kpi .l{color:var(--ink2);font-size:12px}
+.section{margin-top:12px}
+.bar{height:10px;background:var(--track);border-radius:5px;overflow:hidden;margin:6px 0 4px}
+.bar>i{display:block;height:100%;background:var(--s1);border-radius:5px;min-width:2px}
+.goal{margin-top:10px}
+.goal .row{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink2);margin:6px 0 2px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;
+  vertical-align:-1px;background:var(--c)}
+.legend .ln::before{height:3px;border-radius:2px;vertical-align:3px;width:14px}
+.legend .dash::before{background:repeating-linear-gradient(90deg,var(--c) 0 4px,transparent 4px 7px)}
+svg{display:block;width:100%;height:auto;overflow:visible}
+svg text{fill:var(--ink3);font-size:11px;font-family:inherit}
+.tablewrap{overflow-x:auto;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+th{color:var(--ink2);font-weight:550;font-size:12px}
+th:first-child,td:first-child{text-align:left;white-space:normal;min-width:220px}
+td.left,th.left{text-align:left}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--grid)}
+tbody tr.sel{background:var(--grid);box-shadow:inset 3px 0 0 var(--s1)}
+.chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);color:var(--ink2);margin-left:6px}
+.chip i{display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--c);margin-right:4px}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink)}
+.badge b{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--c);color:#fff;font-size:10px}
+.advice{color:var(--ink2);font-size:12px;white-space:normal;text-align:left;max-width:520px}
+.pipe{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.pipe .it{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:13px;align-items:center}
+.pipe .it .bar{grid-column:1/3;margin:0 0 6px;height:6px}
+.ms{list-style:none;margin:6px 0 0;padding:0}
+.ms li{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.ms .dot{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none;background:var(--s3)}
+.ms .todo .dot{background:transparent;border:2px solid var(--ink3)}
+.ms .todo{color:var(--ink2)}
+.ms .d{margin-left:auto;color:var(--ink3);font-variant-numeric:tabular-nums}
+pre.review{white-space:pre-wrap;font:13px/1.5 inherit;margin:8px 0 0;color:var(--ink)}
+select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px 6px;max-width:100%}
+#tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);padding:6px 9px;border-radius:6px;
+  font-size:12px;line-height:1.4;opacity:0;transition:opacity .08s;z-index:9;max-width:280px}
+#tip b{font-weight:600}
+.empty{color:var(--ink3);font-size:13px;padding:24px 0;text-align:center}
+.glossary{font-size:12px;color:var(--ink2);columns:2 300px;column-gap:24px}
+.glossary p{margin:0 0 6px;break-inside:avoid}
+.theme{margin-left:auto;font-size:12px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:6px;padding:3px 8px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>__TITLE__</h1>
+    <span class="sub" id="updated"></span>
+    <button class="theme" id="themeBtn" type="button">Light / dark</button>
+  </header>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="grid two">
+    <div class="card">
+      <h2>Goal: YouTube Partner Program (Shorts route)</h2>
+      <div class="muted">Both are needed. Views count over the last 90 days.</div>
+      <div id="goals"></div>
+    </div>
+    <div class="card">
+      <h2>Milestones</h2>
+      <ul class="ms" id="milestones"></ul>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h2>Every video: how it's doing and what to fix</h2>
+    <div class="muted">Compared with your channel's median at the same age. Click a row to see its retention curve below.</div>
+    <div class="tablewrap"><table id="scorecard"></table></div>
+  </div>
+
+  <div class="grid two section">
+    <div class="card">
+      <h2>Views per day</h2>
+      <div class="muted">YouTube Analytics, arrives 1–3 days late</div>
+      <div class="legend"><span style="--c:var(--s1)">Educational</span><span style="--c:var(--s2)">Music edits</span></div>
+      <div id="viewsChart"></div>
+    </div>
+    <div class="card">
+      <h2>Who keeps watching</h2>
+      <div class="muted">Share of viewers still watching at each point. Above 100% = people rewatch/loop.</div>
+      <div style="margin:6px 0"><select id="curvePick" aria-label="Video"></select></div>
+      <div class="legend"><span class="ln" style="--c:var(--s1)">This video</span><span class="ln dash" style="--c:var(--ink3)">Channel median</span></div>
+      <div id="curveChart"></div>
+    </div>
+  </div>
+
+  <div class="grid two section">
+    <div class="card">
+      <h2>What was made, per day</h2>
+      <div class="legend"><span style="--c:var(--s1)">Educational Shorts</span><span style="--c:var(--s2)">Music edits</span><span style="--c:var(--s3)">Went public</span></div>
+      <div id="prodChart"></div>
+    </div>
+    <div class="card">
+      <h2>Educational vs music edits</h2>
+      <div class="muted">Public videos only</div>
+      <div class="tablewrap"><table id="kinds"></table></div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h2>Where everything is</h2>
+    <div class="pipe" id="pipeline" style="margin-top:10px"></div>
+  </div>
+
+  <div class="grid two section">
+    <div class="card">
+      <h2>Claude usage</h2>
+      <div class="muted" id="claudeTotals"></div>
+      <div id="claudeChart"></div>
+    </div>
+    <div class="card">
+      <h2>Weekly review (Claude)</h2>
+      <div id="review"></div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h2>How to read this</h2>
+    <div class="glossary" style="margin-top:8px">
+      <p><b>vs median</b>: views in the first 2 days (7 when available) divided by your typical video at that age. 2.0× = twice as good.</p>
+      <p><b>% watched</b>: average share of the video watched (loops excluded).</p>
+      <p><b>Hook</b>: share of viewers still watching after ~3 seconds. The first 2–3 s decide whether people swipe away.</p>
+      <p><b>Feed</b>: share of views from the Shorts feed. Low = YouTube isn't showing it to new people yet.</p>
+      <p><b>Swipe</b>: Studio-only "viewed vs swiped away". Shown only if you drop a Studio CSV export into <code>work\analytics\studio\</code>.</p>
+      <p><b>Diagnosis</b>: one problem at a time: barely shown → topic/niche; weak hook → first 2–3 s; slow middle → pacing; small topic → bigger subject; no new subs → give a reason to follow.</p>
+    </div>
+  </div>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => n == null ? "–" : n >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/,"")+"M" : n >= 1e4 ? Math.round(n/1e3)+"k" : n >= 1e3 ? (n/1e3).toFixed(1).replace(/\.0$/,"")+"k" : String(Math.round(n));
+const pct = (x, scale=1) => x == null ? "–" : Math.round(x*scale) + "%";
+const shortDay = d => { const t = new Date(d+"T00:00:00"); return t.toLocaleDateString(undefined,{month:"short",day:"numeric"}); };
+const NS = "http://www.w3.org/2000/svg";
+
+/* theme toggle (remembered per browser) */
+(() => {
+  let t = null; try { t = localStorage.getItem("dash-theme"); } catch(e) {}
+  if (t) document.documentElement.dataset.theme = t;
+  $("themeBtn").onclick = () => {
+    const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark"
+                 : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("dash-theme", next); } catch(e) {}
+  };
+})();
+
+/* tooltip */
+const tip = $("tip");
+function showTip(e, html){ tip.innerHTML = html; tip.style.opacity = 1;
+  const r = tip.getBoundingClientRect(); let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px"; }
+function hideTip(){ tip.style.opacity = 0; }
+
+function el(tag, attrs, parent){ const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; }
+function niceMax(v){ if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
+
+/* stacked bar chart: rows = [{label, ...}], series = [{key, name, color}] */
+function bars(target, rows, series, opt={}){
+  const box = $(target); box.innerHTML = "";
+  if (!rows.length || rows.every(r => series.every(s => !r[s.key]))) {
+    box.innerHTML = `<div class="empty">${opt.empty || "No data yet"}</div>`; return; }
+  const W = 560, H = 200, L = 34, B = 22, T = 8, R = 4;
+  const svg = el("svg", {viewBox:`0 0 ${W} ${H}`, role:"img", "aria-label": opt.label || "bar chart"}, box);
+  const tot = rows.map(r => series.reduce((a, s) => a + (r[s.key] || 0), 0));
+  const max = niceMax(Math.max(...tot));
+  const y = v => T + (H - T - B) * (1 - v / max);
+  for (let i = 0; i <= 4; i++) { const v = max * i / 4;
+    el("line", {x1:L, x2:W-R, y1:y(v), y2:y(v), stroke:"var(--grid)", "stroke-width":1}, svg);
+    const t = el("text", {x:L-6, y:y(v)+4, "text-anchor":"end"}, svg); t.textContent = opt.yfmt ? opt.yfmt(v) : fmt(v); }
+  const n = rows.length, slot = (W - L - R) / n, bw = Math.max(2, Math.min(28, slot * 0.7));
+  const every = Math.ceil(n / 8);
+  rows.forEach((r, i) => {
+    const cx = L + slot * i + slot / 2; let acc = 0;
+    const segs = series.filter(s => r[s.key]);
+    segs.forEach((s, j) => {
+      const v = r[s.key], y0 = y(acc), y1 = y(acc + v); acc += v;
+      const top = j === segs.length - 1, h = Math.max(1, y0 - y1 - (j ? 2 : 0));
+      const rad = top ? Math.min(4, bw/2, h) : 0;
+      const x0 = cx - bw/2, yt = y1;
+      const d = rad ? `M${x0},${yt+h} V${yt+rad} Q${x0},${yt} ${x0+rad},${yt} H${x0+bw-rad} Q${x0+bw},${yt} ${x0+bw},${yt+rad} V${yt+h} Z`
+                    : `M${x0},${yt+h} V${yt} H${x0+bw} V${yt+h} Z`;
+      el("path", {d, fill:s.color}, svg);
+    });
+    if (i % every === 0) { const t = el("text", {x:cx, y:H-6, "text-anchor":"middle"}, svg); t.textContent = shortDay(r.day); }
+    const hit = el("rect", {x:L + slot*i, y:T, width:slot, height:H-T-B, fill:"transparent"}, svg);
+    hit.addEventListener("mousemove", e => showTip(e, `<b>${shortDay(r.day)}</b><br>` +
+      series.map(s => `${esc(s.name)}: ${opt.vfmt ? opt.vfmt(r[s.key]||0, r) : fmt(r[s.key]||0)}`).join("<br>") +
+      (opt.extra ? opt.extra(r) : "")));
+    hit.addEventListener("mouseleave", hideTip);
+  });
+}
+
+/* line chart: lines = [{name, color, pts:[[x,y]], dash}] x in 0..1 */
+function lines(target, data, opt={}){
+  const box = $(target); box.innerHTML = "";
+  if (!data.some(l => l.pts.length)) { box.innerHTML = `<div class="empty">${opt.empty || "No data yet"}</div>`; return; }
+  const W = 560, H = 200, L = 40, B = 22, T = 8, R = 8;
+  const svg = el("svg", {viewBox:`0 0 ${W} ${H}`, role:"img", "aria-label": opt.label || "line chart"}, box);
+  const ymax = Math.max(1, ...data.flatMap(l => l.pts.map(p => p[1])));
+  const top = ymax > 1 ? Math.ceil(ymax * 4) / 4 : 1;
+  const x = v => L + (W - L - R) * v, y = v => T + (H - T - B) * (1 - v / top);
+  for (let v = 0; v <= top + 1e-9; v += top > 1 ? 0.5 : 0.25) {
+    el("line", {x1:L, x2:W-R, y1:y(v), y2:y(v), stroke:"var(--grid)", "stroke-width":1}, svg);
+    const t = el("text", {x:L-6, y:y(v)+4, "text-anchor":"end"}, svg); t.textContent = Math.round(v*100) + "%"; }
+  [0, .25, .5, .75, 1].forEach(v => { const t = el("text", {x:x(v), y:H-6, "text-anchor": v===0?"start":v===1?"end":"middle"}, svg);
+    t.textContent = opt.xfmt ? opt.xfmt(v) : Math.round(v*100) + "%"; });
+  data.forEach(l => { if (!l.pts.length) return;
+    el("path", {d: l.pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(""),
+      fill:"none", stroke:l.color, "stroke-width":2, "stroke-linejoin":"round", "stroke-linecap":"round",
+      ...(l.dash ? {"stroke-dasharray":"5 4"} : {})}, svg); });
+  const cross = el("line", {y1:T, y2:H-B, stroke:"var(--ink3)", "stroke-width":1, opacity:0}, svg);
+  const dots = data.map(l => el("circle", {r:4, fill:l.color, stroke:"var(--surface)", "stroke-width":2, opacity:0}, svg));
+  const hit = el("rect", {x:L, y:T, width:W-L-R, height:H-T-B, fill:"transparent"}, svg);
+  hit.addEventListener("mousemove", e => {
+    const b = svg.getBoundingClientRect(); const xv = Math.min(1, Math.max(0, ((e.clientX - b.left) * W / b.width - L) / (W - L - R)));
+    cross.setAttribute("x1", x(xv)); cross.setAttribute("x2", x(xv)); cross.setAttribute("opacity", 1);
+    let rows = [];
+    data.forEach((l, i) => { if (!l.pts.length) return;
+      const p = l.pts.reduce((a, q) => Math.abs(q[0]-xv) < Math.abs(a[0]-xv) ? q : a);
+      dots[i].setAttribute("cx", x(p[0])); dots[i].setAttribute("cy", y(p[1])); dots[i].setAttribute("opacity", 1);
+      rows.push(`${esc(l.name)}: ${Math.round(p[1]*100)}%`); });
+    showTip(e, `<b>${opt.xfmt ? opt.xfmt(xv) : Math.round(xv*100) + "%"} into the video</b><br>` + rows.join("<br>"));
+  });
+  hit.addEventListener("mouseleave", () => { hideTip(); cross.setAttribute("opacity", 0); dots.forEach(d => d.setAttribute("opacity", 0)); });
+}
+
+/* ── header + KPIs ── */
+$("updated").textContent = `Updated ${D.generated}` + (D.fetched_at ? ` · YouTube data from ${D.fetched_at.slice(0,16)}` : " · no YouTube data yet");
+const K = D.kpi, C = D.channel;
+const kpis = [
+  ["Subscribers", fmt(C.subscribers)], ["Channel views", fmt(C.total_views)], ["Public videos", K.public],
+  ["Videos made", K.made, `${K.shorts_made} educational · ${K.edits_made} edits`],
+  ["Typical % watched", K.median_pct == null ? "–" : Math.round(K.median_pct) + "%", "median of public videos"],
+  ["Claude spend", "$" + K.claude_cost.toFixed(2), `${K.claude_calls} calls`],
+];
+$("kpis").innerHTML = kpis.map(([l, v, s]) => `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div>${s ? `<div class="muted">${s}</div>` : ""}</div>`).join("");
+
+/* ── goals ── */
+const goals = [["Subscribers", D.ypp.subs, 1000], ["Shorts views (90 days)", D.ypp.views90, 10000000]];
+$("goals").innerHTML = goals.map(([l, v, g]) => { const p = Math.min(100, v / g * 100);
+  return `<div class="goal"><div class="row"><span>${l}</span><span><b>${fmt(v)}</b> / ${fmt(g)}</span></div>
+  <div class="bar" role="progressbar" aria-valuenow="${v}" aria-valuemax="${g}" aria-label="${l}"><i style="width:${p}%"></i></div>
+  <div class="muted">${p < 0.1 ? "just started" : p.toFixed(p < 10 ? 1 : 0) + "% of the way"}</div></div>`; }).join("") +
+  `<div class="muted" style="margin-top:10px">An earlier tier (fan funding) opens at 500 subscribers + 3M Shorts views in 90 days.</div>`;
+
+/* ── milestones ── */
+$("milestones").innerHTML = D.milestones.map(m => m.done
+  ? `<li><span class="dot"></span><span>${esc(m.label)}</span><span class="d">${shortDay(m.date)}</span></li>`
+  : `<li class="todo"><span class="dot"></span><span>Next: ${esc(m.label)}</span><span class="d">now ${fmt(m.now)}</span></li>`).join("");
+
+/* ── scorecard ── */
+const LV = {good:["var(--good)","✓"], info:["var(--info)","i"], warning:["var(--warning)","!"], serious:["var(--serious)","!"]};
+const KC = {short:["var(--s1)","Educational"], edit:["var(--s2)","Edit"]};
+const vids = [...D.videos].sort((a, b) => (b.published || "").localeCompare(a.published || ""));
+let selected = (vids.find(v => v.curve && v.curve.length) || vids[0] || {}).video_id;
+function renderTable(){
+  if (!vids.length) { $("scorecard").innerHTML = `<tr><td class="empty">No YouTube data yet. Run: python fetch_analytics.py</td></tr>`; return; }
+  const head = `<thead><tr><th>Video</th><th>Age</th><th>Views</th><th title="views vs channel median at same age">vs median</th>
+    <th>% watched</th><th title="still watching after ~3 s">Hook</th><th title="share of views from the Shorts feed">Feed</th>
+    <th title="Studio: viewed vs swiped away">Swipe</th><th class="left">Diagnosis</th></tr></thead>`;
+  const body = vids.map(v => { const [c, ic] = LV[v.diagnosis.level] || LV.info; const [kc, kn] = KC[v.kind] || KC.short;
+    const o = v.outlier_d7 ?? v.outlier_d2;
+    return `<tr data-id="${esc(v.video_id)}" class="${v.video_id === selected ? "sel" : ""}">
+      <td>${esc(v.title)}<span class="chip"><i style="--c:${kc}"></i>${kn}</span>${v.privacy !== "public" ? `<span class="chip">${esc(v.privacy)}</span>` : ""}
+        ${v.diagnosis.level === "info" ? "" : `<div class="advice">${esc(v.diagnosis.advice)}</div>`}</td>
+      <td>${v.age_days == null ? "–" : v.age_days + "d"}</td>
+      <td title="engaged: ${v.engaged_views ?? "–"}">${fmt(v.views)}</td>
+      <td>${o == null ? "–" : o.toFixed(1) + "×"}</td>
+      <td>${v.avg_view_pct == null ? "–" : Math.round(v.avg_view_pct) + "%"}</td>
+      <td>${pct(v.hook_ret, 100)}</td><td>${pct(v.feed_share, 100)}</td>
+      <td>${v.viewed_pct == null ? "–" : Math.round(v.viewed_pct) + "%"}</td>
+      <td class="left" title="${esc(v.diagnosis.advice)}"><span class="badge" style="--c:${c}"><b aria-hidden="true">${ic}</b>${esc(v.diagnosis.label)}</span></td></tr>`; }).join("");
+  $("scorecard").innerHTML = head + "<tbody>" + body + "</tbody>";
+  $("scorecard").querySelectorAll("tbody tr").forEach(tr => tr.onclick = () => { selected = tr.dataset.id; renderTable(); renderCurve(); });
+}
+
+/* ── retention curve ── */
+const pick = $("curvePick");
+pick.innerHTML = vids.map(v => `<option value="${esc(v.video_id)}">${esc(v.title)}${v.curve.length ? "" : " (no curve yet)"}</option>`).join("");
+pick.onchange = () => { selected = pick.value; renderTable(); renderCurve(); };
+function renderCurve(){
+  const v = vids.find(x => x.video_id === selected); if (!v) { lines("curveChart", [], {}); return; }
+  pick.value = v.video_id;
+  const dur = v.duration_s;
+  lines("curveChart", [
+    {name:"Channel median", color:"var(--ink3)", pts:D.median_curve, dash:true},
+    {name:"This video", color:"var(--s1)", pts:v.curve},
+  ], {empty:"No retention curve yet (needs a public video with enough views; data arrives 1–3 days late).",
+      xfmt: dur ? (f => Math.round(f * dur) + "s") : null, label:"retention curve"});
+}
+
+/* ── charts ── */
+bars("viewsChart", D.views_daily, [{key:"short", name:"Educational", color:"var(--s1)"}, {key:"edit", name:"Music edits", color:"var(--s2)"}],
+  {empty:"No daily views yet. They appear 1–3 days after videos go public.", label:"views per day"});
+bars("prodChart", D.production, [{key:"short", name:"Educational Shorts", color:"var(--s1)"}, {key:"edit", name:"Music edits", color:"var(--s2)"},
+  {key:"published", name:"Went public", color:"var(--s3)"}], {label:"production per day"});
+$("claudeTotals").textContent = `${K.claude_calls} calls · $${K.claude_cost.toFixed(2)} total (subscription; the dollar figure is what the API would have cost)`;
+bars("claudeChart", D.claude, [{key:"cost", name:"Cost", color:"var(--s1)"}],
+  {yfmt: v => "$" + v.toFixed(v < 1 ? 2 : 0), vfmt: v => "$" + v.toFixed(2), extra: r => `<br>${r.calls} calls · ${fmt(r.tokens)} tokens`, label:"Claude cost per day"});
+
+/* ── kinds ── */
+$("kinds").innerHTML = `<thead><tr><th>Kind</th><th>Videos</th><th>Views</th><th>Typical views</th><th>% watched</th><th>Hook</th><th>Subs</th></tr></thead><tbody>` +
+  D.kinds.map(k => { const [kc] = KC[k.kind];
+    return `<tr><td><span class="chip" style="margin:0"><i style="--c:${kc}"></i>${esc(k.name)}</span></td><td>${k.count}</td><td>${fmt(k.views)}</td>
+    <td>${fmt(k.median_views)}</td><td>${k.median_pct == null ? "–" : Math.round(k.median_pct) + "%"}</td><td>${pct(k.median_hook, 100)}</td><td>${fmt(k.subs)}</td></tr>`; }).join("") + "</tbody>";
+
+/* ── pipeline ── */
+$("pipeline").innerHTML = D.pipeline.map(g => { const mx = Math.max(1, ...g.items.map(i => i[1]));
+  return `<div><div style="font-weight:600;margin-bottom:6px">${esc(g.group)}</div>` +
+    g.items.map(([l, n]) => `<div class="it"><span>${esc(l)}</span><b>${n}</b><div class="bar"><i style="width:${n / mx * 100}%;${n ? "" : "min-width:0"}"></i></div></div>`).join("") + "</div>"; }).join("");
+
+/* ── weekly review ── */
+$("review").innerHTML = D.review.text
+  ? `<div class="muted">${esc(D.review.name)} · proposals only, nothing changes until you approve</div><pre class="review">${esc(D.review.text)}</pre>`
+  : `<div class="empty" style="text-align:left;padding:8px 0">Not yet: ${esc(D.review.why)}.<br>Claude will compare your best and worst videos once enough have data, and suggest changes for you to approve.</div>`;
+
+renderTable(); renderCurve();
+</script>
+</body>
+</html>

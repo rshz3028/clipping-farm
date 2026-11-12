@@ -2,11 +2,14 @@
 
     python fetch_analytics.py            fetch + save a snapshot + print a table
     python fetch_analytics.py --show     print the last saved snapshot only (no API calls)
+    python fetch_analytics.py --report   print the scorecard (scores vs channel median + diagnosis)
 
 Uses the official YouTube Data API (public counts: views/likes/comments) and the
 YouTube Analytics API (watch time, average % viewed, shares, subs gained, traffic sources).
 Each run appends one snapshot per video to work/pipeline.db (table yt_stats), so the
-history builds up if you run it daily. Videos are linked to our own sidecar .json
+history builds up if you run it daily. It also replaces: yt_daily (views per video per day),
+yt_retention (retention curve per public video), and adds a yt_channel row (subscribers, total views).
+Tables are defined in pipeline/analytics/store.py. Videos are linked to our own sidecar .json
 (by YouTube ID, or by title for Shorts uploaded by hand in Studio).
 
 Sign-in: uses its OWN token (secrets/youtube_read_token.json) with read-only permissions,
@@ -25,28 +28,16 @@ VENV = ROOT / ".venv"
 if Path(sys.prefix).resolve() != VENV.resolve():
     sys.exit(subprocess.call([str(VENV / "Scripts" / "python.exe"), str(Path(__file__).resolve()), *sys.argv[1:]]))
 
-from pipeline.core import registry                      # noqa: E402
 from pipeline.core.settings import CONFIG, OUTPUT       # noqa: E402
+from pipeline.analytics import features, scorecard, store, studio   # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly",
           "https://www.googleapis.com/auth/yt-analytics.readonly"]
 CFG = CONFIG.get("upload", {})
 TOKEN = ROOT / "secrets" / "youtube_read_token.json"
+ENGAGED = ["engagedViews"]       # stricter Shorts view count (since 2025-03-31); dropped if the API refuses it
 METRICS = ["views", "estimatedMinutesWatched", "averageViewDuration", "averageViewPercentage",
            "likes", "comments", "shares", "subscribersGained", "subscribersLost"]
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS yt_stats (
-    video_id TEXT, fetched_at TEXT, title TEXT, published_at TEXT, privacy TEXT,
-    duration_s REAL, short_id TEXT,
-    views INTEGER, likes INTEGER, comments INTEGER,             -- public counters (live)
-    a_views INTEGER, a_minutes REAL, a_avg_view_s REAL, a_avg_view_pct REAL,
-    a_likes INTEGER, a_comments INTEGER, a_shares INTEGER, a_subs_gained INTEGER, a_subs_lost INTEGER,
-    traffic_json TEXT,                                          -- views per traffic source
-    PRIMARY KEY (video_id, fetched_at)
-);
-"""
-
 
 def clients(no_login=False):
     from google.auth.transport.requests import Request
@@ -96,7 +87,7 @@ def sidecar_index():
 
 
 def channel_videos(yt):
-    ch = yt.channels().list(part="id,snippet,contentDetails", mine=True).execute()["items"][0]
+    ch = yt.channels().list(part="id,snippet,contentDetails,statistics", mine=True).execute()["items"][0]
     uploads = ch["contentDetails"]["relatedPlaylists"]["uploads"]
     print(f"Channel: {ch['snippet']['title']} ({ch['id']})")
     ids, tok = [], None
@@ -111,7 +102,24 @@ def channel_videos(yt):
     for i in range(0, len(ids), 50):
         r = yt.videos().list(part="snippet,statistics,status,contentDetails", id=",".join(ids[i:i + 50])).execute()
         vids += r["items"]
-    return ch["id"], vids
+    return ch, vids
+
+
+def _query(ya, metrics, **kw):
+    """Run one Analytics query; if engagedViews is refused, retry without it (and stop asking for it)."""
+    from googleapiclient.errors import HttpError
+    want = ENGAGED + metrics
+    try:
+        r = ya.reports().query(ids="channel==MINE", metrics=",".join(want), **kw).execute()
+    except HttpError as e:
+        if ENGAGED and ("engagedViews" in str(e) or e.resp.status == 400):
+            ENGAGED.clear()
+            print("note: engagedViews not available here; continuing without it")
+            r = ya.reports().query(ids="channel==MINE", metrics=",".join(metrics), **kw).execute()
+        else:
+            raise
+    cols = [c["name"] for c in r.get("columnHeaders", [])]
+    return [dict(zip(cols, row)) for row in r.get("rows", [])]
 
 
 def analytics(ya, video_ids, start):
@@ -119,12 +127,8 @@ def analytics(ya, video_ids, start):
     out = {}
     for i in range(0, len(video_ids), 200):
         chunk = video_ids[i:i + 200]
-        r = ya.reports().query(ids="channel==MINE", startDate=start, endDate=end, dimensions="video",
-                               metrics=",".join(METRICS), filters="video==" + ",".join(chunk),
-                               sort="-views", maxResults=200).execute()
-        cols = [c["name"] for c in r.get("columnHeaders", [])]
-        for row in r.get("rows", []):
-            rec = dict(zip(cols, row))
+        for rec in _query(ya, METRICS, startDate=start, endDate=end, dimensions="video",
+                          filters="video==" + ",".join(chunk), sort="-views", maxResults=200):
             out[rec["video"]] = rec
     traffic = {}
     for vid in video_ids:
@@ -138,17 +142,64 @@ def analytics(ya, video_ids, start):
     return out, traffic
 
 
-def save(rows):
-    with registry.connect() as conn:
-        conn.executescript(SCHEMA)
+def per_video(ya, vids, start):
+    """Daily views, playback locations (Shorts feed share) and the retention curve, per video."""
+    end = dt.date.today().isoformat()
+    daily, location, retention = {}, {}, {}
+    for v in vids:
+        vid = v["id"]
+        f = f"video=={vid}"
+        try:
+            daily[vid] = _query(ya, ["views", "estimatedMinutesWatched", "subscribersGained"],
+                                startDate=start, endDate=end, dimensions="day", filters=f, sort="day")
+        except Exception as e:
+            print(f"daily views failed for {vid}: {str(e)[:150]}")
+        try:
+            r = ya.reports().query(ids="channel==MINE", startDate=start, endDate=end, metrics="views",
+                                   dimensions="insightPlaybackLocationType", filters=f).execute()
+            location[vid] = {row[0]: row[1] for row in r.get("rows", [])}
+        except Exception as e:
+            location[vid] = {"error": str(e)[:200]}
+        if v["status"]["privacyStatus"] != "public":
+            continue
+        try:
+            r = ya.reports().query(ids="channel==MINE", startDate=start, endDate=end,
+                                   metrics="audienceWatchRatio,relativeRetentionPerformance",
+                                   dimensions="elapsedVideoTimeRatio", filters=f).execute()
+            retention[vid] = r.get("rows", [])
+        except Exception as e:
+            print(f"retention failed for {vid}: {str(e)[:150]}")
+    return daily, location, retention
+
+
+def save(rows, ch=None, daily=None, retention=None):
+    now = rows[0]["fetched_at"]
+    conn = store.connect()
+    try:
         cols = list(rows[0].keys())
         conn.executemany(f"INSERT OR REPLACE INTO yt_stats ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                          [tuple(r[c] for c in cols) for r in rows])
+        if ch:
+            st = ch.get("statistics", {})
+            conn.execute("INSERT OR REPLACE INTO yt_channel VALUES (?,?,?,?,?,?)",
+                         (now, ch["id"], ch["snippet"]["title"], int(st.get("subscriberCount", 0)),
+                          int(st.get("viewCount", 0)), int(st.get("videoCount", 0))))
+        for vid, days in (daily or {}).items():
+            conn.execute("DELETE FROM yt_daily WHERE video_id=?", (vid,))
+            conn.executemany("INSERT INTO yt_daily VALUES (?,?,?,?,?,?,?)",
+                             [(vid, d["day"], d.get("views"), d.get("engagedViews"), d.get("estimatedMinutesWatched"),
+                               d.get("subscribersGained"), now) for d in days])
+        for vid, pts in (retention or {}).items():
+            conn.execute("DELETE FROM yt_retention WHERE video_id=?", (vid,))
+            conn.executemany("INSERT OR REPLACE INTO yt_retention VALUES (?,?,?,?,?)",
+                             [(vid, float(p[0]), p[1], p[2], now) for p in pts])
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def show():
-    with registry.connect() as conn:
-        conn.executescript(SCHEMA)
+    with store.connect() as conn:
         last = conn.execute("SELECT MAX(fetched_at) FROM yt_stats").fetchone()[0]
         if not last:
             print("No snapshots yet. Run without --show first.")
@@ -169,15 +220,21 @@ def show():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--show", action="store_true")
+    ap.add_argument("--report", action="store_true", help="print the scorecard (no API calls)")
     ap.add_argument("--no-login", action="store_true", help="never open a browser (for unattended runs)")
     args = ap.parse_args()
     if args.show:
         show()
         return 0
+    if args.report:
+        features.refresh()
+        studio.import_all()
+        scorecard.print_report()
+        return 0
 
     from googleapiclient.errors import HttpError
     yt, ya = clients(args.no_login)
-    _, vids = channel_videos(yt)
+    ch, vids = channel_videos(yt)
     if not vids:
         print("No videos on this channel.")
         return 0
@@ -190,6 +247,11 @@ def main():
         if "accessNotConfigured" in str(e) or "has not been used" in str(e):
             print("-> Enable 'YouTube Analytics API' in Google Cloud Console for this project, then re-run.")
         an, traffic = {}, {}
+    try:
+        daily, location, retention = per_video(ya, vids, start)
+    except HttpError as e:
+        print(f"Per-video analytics failed: {str(e)[:300]}")
+        daily, location, retention = {}, {}, {}
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
@@ -206,10 +268,15 @@ def main():
             a_likes=a.get("likes"), a_comments=a.get("comments"), a_shares=a.get("shares"),
             a_subs_gained=a.get("subscribersGained"), a_subs_lost=a.get("subscribersLost"),
             traffic_json=json.dumps(traffic.get(v["id"], {})),
+            engaged_views=a.get("engagedViews"), location_json=json.dumps(location.get(v["id"], {})),
         ))
-    save(rows)
-    print(f"Saved {len(rows)} videos to yt_stats.")
+    save(rows, ch, daily, retention)
+    print(f"Saved {len(rows)} videos to yt_stats (+ {sum(map(len, daily.values()))} daily rows, "
+          f"{sum(1 for r in retention.values() if r)} retention curves with data).")
+    features.refresh()
+    studio.import_all()
     show()
+    scorecard.print_report()
     return 0
 
 

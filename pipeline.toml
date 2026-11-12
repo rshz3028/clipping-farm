@@ -152,6 +152,14 @@ contains_synthetic_media = false  # YouTube "altered or synthetic content" label
 tags = ["science", "history", "archival footage", "explained"]
 max_per_run = 5                   # YouTube API quota allows about 6 uploads per day
 
+# ── Analytics (fetch_analytics.py, dashboard.py, pipeline/analytics/) ──
+[analytics]
+min_views_to_judge = 30    # below this a video is "too few views" (numbers are noise)
+hook_seconds = 3           # "hook" = share of viewers still watching at this second
+weekly_review = true       # weekly Claude review (1 call) -> work/analytics/proposals/; proposals only
+weekly_min_videos = 20     # ...but only once this many public videos are 7+ days old
+weekly_every_days = 7
+
 # ── Daily run (run_daily.py): the jobs, in order. Each is pipeline/daily/<name>.py ──
 [daily]
 jobs = ["analytics", "edits", "cleanup"]   # educational Shorts paused by owner (2026-11-12); add "discover", "produce" back to resume
